@@ -3,8 +3,6 @@
 import os
 from unittest.mock import patch
 
-import pytest
-
 
 class TestNVIDIAConfig:
     """Tests for NVIDIA API configuration."""

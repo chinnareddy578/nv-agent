@@ -1,9 +1,6 @@
 """Integration tests for FastAPI endpoints — session, chat, and KB management."""
 
-import json
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import patch
 
 
 # ── Health endpoint ──────────────────────────────────────────

@@ -1,8 +1,6 @@
 """Unit tests for agent/session_store.py — session persistence."""
 
-import json
 import os
-from datetime import datetime, timezone
 
 import pytest
 from agent.rag_agent import Message, Session

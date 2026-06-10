@@ -1,7 +1,6 @@
 """Unit tests for kb/chunker.py — text splitting logic."""
 
-import pytest
-from kb.chunker import Chunk, chunk_text, chunk_text_preserving_structure
+from kb.chunker import chunk_text, chunk_text_preserving_structure
 
 
 # ── chunk_text() basic behavior ─────────────────────────────
@@ -72,9 +71,9 @@ class TestSentenceBoundary:
     """Tests for sentence-aware chunking."""
 
     def test_splits_at_sentence_boundary(self):
-        # Long text with sentence boundaries where each sentence exceeds min_chunk_size
+        # Long text with clear sentence boundaries
         text = "First sentence here with enough words to exceed one hundred characters in total. " * 6
-        result = chunk_text(text, "test.md", chunk_size=150, chunk_overlap=0)
+        result = chunk_text(text, "test.md", chunk_size=150, chunk_overlap=0, min_chunk_size=50)
         assert len(result) >= 2
 
     def test_does_not_cut_mid_sentence(self):

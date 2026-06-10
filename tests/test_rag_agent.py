@@ -4,10 +4,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 
 from agent.rag_agent import (
-    Message,
     RAGAgent,
     RAGAgentError,
-    Session,
     SessionNotFoundError,
     LLMError,
 )
