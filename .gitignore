@@ -28,5 +28,16 @@ Thumbs.db
 data/sessions/
 kb/index/
 
+# Test artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# Docker (local overrides)
+docker-compose.override.yml
+
 # Claude Code
 .claude/

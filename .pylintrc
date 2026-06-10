@@ -1,0 +1,51 @@
+[MAIN]
+# Use multiple threads for faster analysis
+jobs=1
+
+# Ignore generated / vendored / irrelevant directories
+ignore=.git,__pycache__,.venv,venv,build,dist,data,kb/index
+
+[MESSAGES CONTROL]
+# Disable warnings that are false positives for this project
+disable=
+    missing-module-docstring,
+    missing-function-docstring,
+    missing-class-docstring,
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    too-many-instance-attributes,
+    broad-exception-caught,
+    line-too-long,
+    fixme,
+    import-outside-toplevel,
+    global-statement,
+    unused-argument,
+    consider-using-f-string,
+    protected-access,
+    redefined-outer-name,
+    cyclic-import
+
+[BASIC]
+# Allow short variable names in comprehensions / tight loops
+good-names=i,j,k,v,e,x,ex,id,db,f,q,n,p,_,
+
+[FORMAT]
+max-line-length=127
+
+[DESIGN]
+max-args=8
+max-locals=20
+max-branches=15
+max-statements=60
+max-attributes=10
+
+[TYPECHECK]
+# Third-party members that pylint can't resolve
+generated-members=faiss.*,numpy.*
+
+[IMPORTS]
+# Allow relative imports within the project packages
+allow-any-import-level=config,kb,agent,chat

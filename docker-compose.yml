@@ -1,0 +1,39 @@
+# ── NV-Agent Docker Compose ─────────────────────────────────
+# Usage:
+#   docker compose up -d          # Start the agent
+#   docker compose logs -f        # Follow logs
+#   docker compose down           # Stop
+#
+# To add documents, place them in the ./data directory on the host
+# before starting, or upload via the browser UI after startup.
+
+services:
+  nv-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nv-agent
+    ports:
+      - "${NV_PORT:-8000}:8000"
+    env_file:
+      - .env
+    environment:
+      - NV_HOST=0.0.0.0
+      - NV_PORT=8000
+    volumes:
+      # Persist documents and sessions across container restarts
+      - nv-agent-data:/app/data
+      - nv-agent-index:/app/kb/index
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  nv-agent-data:
+    driver: local
+  nv-agent-index:
+    driver: local

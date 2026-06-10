@@ -192,11 +192,11 @@ def chunk_text_preserving_structure(
 
         # If adding this paragraph would exceed chunk_size, finalize current chunk
         if current_chunk and current_size + para_size > chunk_size:
-            chunk_text = '\n\n'.join(current_chunk).strip()
-            if chunk_text:
-                chunk_len = len(chunk_text)
+            combined_text = '\n\n'.join(current_chunk).strip()
+            if combined_text:
+                chunk_len = len(combined_text)
                 chunks.append(Chunk(
-                    text=chunk_text,
+                    text=combined_text,
                     source=source,
                     chunk_index=idx,
                     start_char=char_pos,
@@ -211,11 +211,11 @@ def chunk_text_preserving_structure(
         if para_size > chunk_size:
             # Finalize any pending chunk first
             if current_chunk:
-                chunk_text = '\n\n'.join(current_chunk).strip()
-                if chunk_text:
-                    chunk_len = len(chunk_text)
+                combined_text = '\n\n'.join(current_chunk).strip()
+                if combined_text:
+                    chunk_len = len(combined_text)
                     chunks.append(Chunk(
-                        text=chunk_text,
+                        text=combined_text,
                         source=source,
                         chunk_index=idx,
                         start_char=char_pos,

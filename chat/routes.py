@@ -180,6 +180,89 @@ async def health():
     return HealthResponse(status="ok", kb_chunks=stats["total_chunks"])
 
 
+class DetailedHealthResponse(BaseModel):
+    """Detailed health check response with system info."""
+    status: str
+    version: str
+    kb_chunks: int
+    kb_index_ready: bool
+    chat_model: str
+    embedding_model: str
+    embedding_dim: int
+    active_sessions: int
+    auth_enabled: bool
+    rate_limit: str
+
+
+@router.get("/health/detailed", response_model=DetailedHealthResponse)
+async def health_detailed():
+    """Detailed health check — returns system info, model config, and status."""
+    import time
+
+    from chat.auth import get_auth_key
+    from config import config
+
+    agent = _get_agent()
+    stats = agent.kb_stats()
+    auth_key = get_auth_key()
+
+    return DetailedHealthResponse(
+        status="ok",
+        version="1.0.0",
+        kb_chunks=stats["total_chunks"],
+        kb_index_ready=stats["index_ready"],
+        chat_model=config.nvidia.chat_model,
+        embedding_model=config.nvidia.embedding_model,
+        embedding_dim=config.nvidia.embedding_dim,
+        active_sessions=len(agent.sessions),
+        auth_enabled=auth_key is not None,
+        rate_limit=os.environ.get("NV_AGENT_RATE_LIMIT", "60/minute"),
+    )
+
+
+class APIKeyValidationResponse(BaseModel):
+    """Response for API key validation."""
+    valid: bool
+    model: str | None = None
+    error: str | None = None
+
+
+@router.get("/auth/validate", response_model=APIKeyValidationResponse)
+async def validate_api_key():
+    """Validate that the NVIDIA NIM API key is configured and working.
+
+    Makes a lightweight API call to verify the key. Useful for
+    checking setup before starting a full chat session.
+    """
+    from config import config
+
+    if not config.nvidia.api_key:
+        return APIKeyValidationResponse(
+            valid=False,
+            error="No API key configured. Set NVIDIA_NIM_API_KEY, NVIDIA_API_KEY, or NGC_API_KEY.",
+        )
+
+    try:
+        from openai import OpenAI
+
+        client = OpenAI(
+            base_url=config.nvidia.base_url,
+            api_key=config.nvidia.api_key,
+        )
+        # Minimal call to validate the key — list models (lightweight)
+        client.models.list()
+        return APIKeyValidationResponse(
+            valid=True,
+            model=config.nvidia.chat_model,
+        )
+    except Exception as exc:
+        logger.warning("[auth] API key validation failed: %s", exc)
+        return APIKeyValidationResponse(
+            valid=False,
+            error=str(exc)[:200],
+        )
+
+
 # ── Session endpoints ───────────────────────────────────────────────
 
 @router.post("/sessions", response_model=CreateSessionResponse)

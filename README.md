@@ -33,7 +33,8 @@
   - [Chat](#chat)
   - [Sessions](#sessions)
   - [Knowledge Base](#knowledge-base)
-  - [Health](#health)
+  - [Health & Auth](#health--auth)
+- [Docker](#-docker)
 - [Design Decisions](#-design-decisions)
 - [Security](#-security)
 - [Contributing](#-contributing)
@@ -292,6 +293,8 @@ Conversations survive server restarts. Every message is timestamped and saved to
 | **Dark-themed chat UI** | Responsive single-page interface — sidebar, session management, KB status panel |
 | **Multi-model support** | Any model on NVIDIA NIM (Nemotron, Llama, DeepSeek, etc.) — just change one config value |
 | **Production patterns** | Custom exceptions, proper HTTP status codes, thread-safe state, filename sanitization, upload size limits |
+| **API key auth** | Optional authentication middleware — protect your instance with `NV_AGENT_AUTH_KEY` |
+| **Rate limiting** | Per-IP sliding window rate limiter — configurable via `NV_AGENT_RATE_LIMIT` |
 | **Zero infrastructure** | No external DB — FAISS index on disk, session JSONs on disk, one Python process |
 
 ---
@@ -305,10 +308,16 @@ nv-agent/
 ├── config.py                # ⚙️ Central configuration (dataclasses, reads .env)
 ├── test-agent.py            # 🧪 Quick CLI smoke test (bypasses RAG pipeline)
 ├── requirements.txt         # 📦 Python dependencies
+├── pyproject.toml           # 🔧 Ruff, mypy, pytest config
 ├── .env.example             # 🔑 API key template (copy to .env)
 ├── .gitignore               # 🛡️ Excludes .env, sessions, __pycache__, .venv
+├── .pre-commit-config.yaml  # 🪝 Pre-commit hooks (ruff, mypy, checks)
+├── Dockerfile               # 🐳 Multi-stage Docker build (Python 3.12-slim)
+├── docker-compose.yml       # 🐳 Compose for easy deployment with volumes
+├── LICENSE                  # 📄 MIT License
 ├── README.md                # 📖 You are here
 ├── AGENTS.md                # 🤖 AI agent guidelines and architecture
+├── CLAUDE.md                # 🤖 Claude Code context and conventions
 │
 ├── data/                    # 📂 Your documents — auto-indexed on startup
 │   ├── sample.md            #    Example knowledge base doc
@@ -329,13 +338,29 @@ nv-agent/
 │
 ├── chat/                    # 🌐 Chat API + UI Layer
 │   ├── __init__.py          #    Exports: create_app, router
-│   ├── app.py               #    FastAPI factory, CORS, static file mount
-│   ├── routes.py            #    All endpoints: REST, SSE, WebSocket, file upload
+│   ├── app.py               #    FastAPI factory, middleware, CORS, static file mount
+│   ├── auth.py              #    API key authentication middleware
+│   ├── rate_limit.py        #    Per-IP sliding window rate limiter
+│   ├── routes.py            #    All endpoints: REST, SSE, WebSocket, file upload, health, auth
 │   └── ui/
 │       ├── index.html       #    Chat page (sidebar, messages, upload, KB panel)
 │       ├── style.css        #    Dark theme with NVIDIA green accent
 │       ├── app.js           #    Client logic (WS, SSE, session mgmt, file upload)
 │       └── marked.min.js    #    Markdown renderer
+│
+├── tests/                   # 🧪 Pytest test suite
+│   ├── conftest.py          #    Shared fixtures (mocks, temp dirs, test client)
+│   ├── test_chunker.py      #    Chunking unit tests
+│   ├── test_config.py       #    Configuration unit tests
+│   ├── test_embed.py        #    Embedding client unit tests (mocked API)
+│   ├── test_ingest.py       #    Ingestion pipeline unit tests
+│   ├── test_session_store.py#    Session persistence unit tests
+│   ├── test_rag_agent.py    #    RAG agent unit tests
+│   └── test_api.py          #    FastAPI endpoint integration tests
+│
+├── .github/                 # 🔄 CI/CD
+│   └── workflows/
+│       └── ci.yml           #    GitHub Actions: lint + type check + test + Docker build
 │
 └── .claude/                 # 🔧 Claude Code settings
     └── settings.local.json  #    Local permissions
@@ -478,6 +503,8 @@ All settings are in `config.py` with sensible defaults. Override via environment
 |----------|----------|---------|-------------|
 | `NVIDIA_NIM_API_KEY` | ✅ | — | Your NVIDIA NIM API key (also accepts `NVIDIA_API_KEY`, `NGC_API_KEY`) |
 | `MODEL` | ❌ | `nvidia/nemotron-3-ultra-550b-a55b` | Override the chat model |
+| `NV_AGENT_AUTH_KEY` | ❌ | — | API key for auth middleware (when set, all `/api/*` require `X-API-Key`) |
+| `NV_AGENT_RATE_LIMIT` | ❌ | `60/minute` | Rate limit per IP (format: `N/unit`, e.g., `10/second`, `100/hour`) |
 
 ### Config Defaults (`config.py`)
 
@@ -553,11 +580,41 @@ data: [DONE]
 | `POST` | `/api/kb/upload` | **Upload file** (multipart/form-data, 12 formats supported) |
 | `DELETE` | `/api/kb/reset` | Clear the entire knowledge base |
 
-### Health
+### Health & Auth
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/health` | Returns `{"status": "ok", "kb_chunks": N}` |
+| `GET` | `/api/health/detailed` | Full system info: model, KB status, auth, rate limit, active sessions |
+| `GET` | `/api/auth/validate` | Validate your NVIDIA NIM API key — returns `{valid, model, error}` |
+
+---
+
+## 🐳 Docker
+
+Run NV-Agent in a container — no Python installation needed on the host.
+
+```bash
+# Build and run with docker compose
+cp .env.example .env  # Set your NVIDIA API key
+docker compose up -d
+
+# Or build manually
+docker build -t nv-agent .
+docker run -p 8000:8000 --env-file .env -v $(pwd)/data:/app/data nv-agent
+```
+
+**Docker Compose** persists your documents and FAISS index in named volumes, so they survive container restarts.
+
+**Custom configuration**:
+```bash
+# With auth key and custom rate limit
+docker run -p 8000:8000 \
+  --env-file .env \
+  -e NV_AGENT_AUTH_KEY=my-secret-key \
+  -e NV_AGENT_RATE_LIMIT="30/minute" \
+  nv-agent
+```
 
 ---
 
@@ -566,11 +623,13 @@ data: [DONE]
 | Measure | Details |
 |---------|---------|
 | **No API key in source control** | `.env` is in `.gitignore` — never commit it |
+| **Optional API key auth** | Set `NV_AGENT_AUTH_KEY` to require `X-API-Key` header on all `/api/*` routes |
+| **Per-IP rate limiting** | Default: 60 req/min per IP. Override with `NV_AGENT_RATE_LIMIT` (e.g., `"10/second"`) |
 | **Filename sanitization** | Path traversal stripped, null bytes removed, special chars replaced with `_` |
 | **Upload size limit** | 50 MB max (`MAX_UPLOAD_SIZE` in routes.py) |
 | **Extension validation** | Only `SUPPORTED_EXTENSIONS` allowed → 400 if unsupported |
 | **Generic error responses** | Internal details logged server-side, clients get `"Internal error"` |
-| **Custom exception hierarchy** | Specific HTTP codes: 404 for missing sessions, 502 for LLM errors, 500 for catch-all |
+| **Custom exception hierarchy** | Specific HTTP codes: 401 (auth), 429 (rate limit), 404, 502, 500 |
 
 ---
 
@@ -616,4 +675,4 @@ NV-Agent uses the OpenAI-compatible API format via `config.nvidia.base_url`. To 
 
 ## 📄 License
 
-This project is provided as-is. License to be determined.
+This project is licensed under the [MIT License](LICENSE).
