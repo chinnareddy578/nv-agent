@@ -25,7 +25,8 @@ class NVIDIAConfig:
     """NVIDIA API configuration."""
     api_key: str = field(default_factory=_get_nvidia_api_key)
     base_url: str = "https://integrate.api.nvidia.com/v1"
-    # chat_model: str = "meta/llama-3.1-8b-instruct"
+    # Default chat model — any model on NVIDIA NIM will work here.
+    # test-agent.py hardcodes deepseek-ai/deepseek-v4-pro for standalone CLI smoke tests.
     chat_model: str = "nvidia/nemotron-3-ultra-550b-a55b"
     embedding_model: str = "baai/bge-m3"
     embedding_dim: int = 1024

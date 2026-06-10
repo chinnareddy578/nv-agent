@@ -1,3 +1,12 @@
+"""NV-Agent — Quick CLI Smoke Test.
+
+A minimal, standalone script that calls the NVIDIA NIM API directly
+(without the RAG pipeline).  Useful for verifying API connectivity and
+key validity before starting the full server.
+
+For the production RAG web server, see main.py.
+"""
+
 import os
 from openai import OpenAI
 
@@ -17,6 +26,8 @@ prompt = input("Enter your prompt: ") if os.isatty(0) else "Hello!"
 
 try:
     completion = client.chat.completions.create(
+        # Model override for standalone testing.
+        # main.py uses config.nvidia.chat_model (default: nvidia/nemotron-3-ultra-550b-a55b).
         model="deepseek-ai/deepseek-v4-pro",
         messages=[{"role": "user", "content": prompt}],
         temperature=1,
@@ -35,5 +46,3 @@ try:
     print()  # newline after streaming output
 except Exception as e:
     print(f"\nError: {e}")
-
-

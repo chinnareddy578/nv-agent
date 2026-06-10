@@ -1,33 +1,359 @@
 # ⚡ NV-Agent
 
-**A self-hosted RAG chatbot you can point at your own documents and start asking questions — in 60 seconds.**
+**A production-ready, self-hosted RAG AI Agent that grounds every answer in your own documents — with source citations, real-time streaming, and a full browser UI.**
 
-> Most AI chatbots give you generic answers. NV-Agent grounds every response in **your** documents, cites its sources, and tells you honestly when it doesn't know. Drop in PDFs, Word docs, or text files, and start chatting over your knowledge base instantly.
+> Most AI chatbots give you generic answers. NV-Agent is an **AI agent** that retrieves relevant context from your knowledge base before generating a response — so every answer is grounded, cited, and honest about what it doesn't know.
 
 ---
 
-## The Problem It Solves
+## 📖 Table of Contents
 
-- **Generic AI = generic answers.** Off-the-shelf chatbots hallucinate about your domain because they don't know your data.
-- **RAG is hard to set up.** Most RAG tutorials leave you with a notebook, not a production-ready app with a UI, persistence, and file uploads.
-- **Enterprise knowledge is trapped in files.** PDFs, DOCX files, and text docs sit in folders — NV-Agent makes them instantly queryable.
-- **Conversations are lost.** Most demo chatbots forget everything when you refresh. NV-Agent persists every session to disk.
+- [The Problem It Solves](#-the-problem-it-solves)
+- [What is NV-Agent?](#-what-is-nv-agent)
+- [Why NVIDIA NIM?](#-why-nvidia-nim)
+- [Architecture](#-architecture)
+  - [High-Level System Architecture](#high-level-system-architecture)
+  - [RAG Pipeline Flow](#rag-pipeline-flow)
+  - [Data Flow Diagram](#data-flow-diagram)
+  - [Streaming Architecture](#streaming-architecture)
+  - [Session Persistence](#session-persistence)
+- [Key Capabilities](#-key-capabilities)
+- [Project Structure](#-project-structure)
+- [Quick Start](#-quick-start)
+  - [Prerequisites](#prerequisites)
+  - [Install & Run](#install--run)
+  - [Quick API Test (No Server)](#quick-api-test-no-server)
+- [How to Use](#-how-to-use)
+  - [Adding Documents](#adding-documents)
+  - [Chatting with Your Knowledge Base](#chatting-with-your-knowledge-base)
+  - [Managing Sessions](#managing-sessions)
+  - [Choosing Models](#choosing-models)
+- [Configuration](#-configuration)
+- [API Reference](#-api-reference)
+  - [Chat](#chat)
+  - [Sessions](#sessions)
+  - [Knowledge Base](#knowledge-base)
+  - [Health](#health)
+- [Design Decisions](#-design-decisions)
+- [Security](#-security)
+- [Contributing](#-contributing)
+- [License](#-license)
 
-## What We Built
+---
 
-NV-Agent is a **complete, self-contained RAG system** — not a library, not a framework, not a notebook. You run one command, open a browser, and chat over your own documents:
+## 🎯 The Problem It Solves
 
-| Capability | How |
-|---|---|
+| Problem | Why It Matters | How NV-Agent Solves It |
+|---------|---------------|----------------------|
+| **Generic AI = generic answers** | Off-the-shelf chatbots hallucinate about your domain because they don't know your data | RAG pipeline retrieves your documents before answering — every response is grounded in your knowledge base |
+| **RAG is hard to set up** | Most RAG tutorials leave you with a notebook, not a production-ready app | One command starts a complete system: vector store, embeddings, LLM, session persistence, and browser UI |
+| **Knowledge trapped in files** | PDFs, DOCX, and text docs sit in folders — unsearchable, unqueryable | Drop 12+ file formats into `data/` and they're instantly indexed and queryable |
+| **Conversations are lost** | Most demo chatbots forget everything when you refresh | Every session is persisted to disk with atomic writes — survives restarts and crashes |
+| **No infrastructure for AI** | Running LLMs locally requires GPUs, drivers, and model management | NVIDIA NIM gives you hosted state-of-the-art models via a single API key — zero local GPU needed |
+
+---
+
+## 🤖 What is NV-Agent?
+
+NV-Agent is a **complete, self-contained AI agent system** — not a library, not a framework, not a notebook.
+
+It is a **RAG (Retrieval-Augmented Generation) agent** that:
+
+1. **Retrieves** relevant document chunks from a FAISS vector knowledge base
+2. **Augments** the LLM prompt with retrieved context and source citations
+3. **Generates** grounded answers via NVIDIA NIM LLMs with real-time streaming
+
+You run one command, open a browser, and chat over your own documents:
+
+```bash
+python main.py  # → http://localhost:8000
+```
+
+The agent follows the **ReAct-inspired pattern**: given a user query, it reasons about what context to retrieve, fetches the most relevant chunks from the knowledge base, then generates a cited answer — explicitly stating when the KB doesn't contain the answer.
+
+---
+
+## 🟢 Why NVIDIA NIM?
+
+NVIDIA NIM (NVIDIA Inference Microservices) provides hosted, state-of-the-art open models via a single OpenAI-compatible API endpoint. By building on NVIDIA NIM, NV-Agent gives you:
+
+| Benefit | Details |
+|---------|---------|
+| **Zero infrastructure** | No local GPUs, no model downloads, no driver headaches — just an API key |
+| **Best-in-class models** | Nemotron, Llama, DeepSeek, and 100+ models available instantly |
+| **OpenAI-compatible API** | Same `openai` Python SDK you already know — just a different `base_url` |
+| **Enterprise-grade** | NVIDIA-hosted inference with reliability, rate limiting, and monitoring |
+| **Free tier** | 1,000 credits/month at [build.nvidia.com](https://build.nvidia.com/) |
+
+---
+
+## 🏗️ Architecture
+
+### High-Level System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                          NV-Agent System                            │
+│                                                                     │
+│  ┌──────────┐    ┌──────────────┐    ┌───────────┐    ┌──────────┐ │
+│  │          │    │              │    │           │    │          │ │
+│  │  Chat    │◀──▶│  Chat API    │◀──▶│ RAG Agent │◀──▶│Knowledge │ │
+│  │  UI      │    │  (FastAPI)   │    │ (LLM+RAG) │    │  Base    │ │
+│  │          │    │              │    │           │    │(FAISS +  │ │
+│  │ Browser  │    │ REST / SSE / │    │ Retrieve →│    │ Embeds)  │ │
+│  │ WebSocket│    │ WebSocket    │    │ Augment → │    │          │ │
+│  │          │    │              │    │ Generate  │    │          │ │
+│  └──────────┘    └──────────────┘    └───────────┘    └──────────┘ │
+│       ▲               ▲                   ▲               ▲       │
+│       │               │                   │               │       │
+│       │          ┌────┴─────┐        ┌────┴─────┐   ┌────┴────┐  │
+│       │          │  Session │        │  NVIDIA   │   │  FAISS  │  │
+│       │          │  Store   │        │  NIM API  │   │  Index  │  │
+│       │          │  (Disk)  │        │ (Cloud)   │   │  (Disk) │  │
+│       │          └──────────┘        └───────────┘   └─────────┘  │
+│       │                                                              │
+│  ┌────┴──────────────────────────────────────────────────────────┐  │
+│  │                     config.py (.env)                          │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Four-layer design** — each layer is a Python package with clear `__init__.py` and explicit `__all__` exports:
+
+| Layer | Package | Responsibility |
+|-------|---------|---------------|
+| **Presentation** | `chat/ui/` | Browser UI — vanilla HTML/CSS/JS, WebSocket + SSE + REST |
+| **API** | `chat/` | FastAPI routes, CORS, request/response models, streaming |
+| **Agent** | `agent/` | RAG logic (retrieve → augment → generate), session management |
+| **Knowledge Base** | `kb/` | Document ingestion, chunking, embedding, FAISS vector store |
+
+---
+
+### RAG Pipeline Flow
+
+This is the core of the AI agent — how a user question becomes a grounded, cited answer:
+
+```
+  User asks: "What does our deployment process look like?"
+       │
+       ▼
+┌──────────────────────────────────────────────────────────────┐
+│  1. EMBED QUERY                                              │
+│     User question ──▶ bge-m3 embedding ──▶ 1024-dim vector   │
+│     (NVIDIA NIM embedding API)                               │
+└──────────────┬───────────────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  2. RETRIEVE                                                 │
+│     Query vector ──▶ FAISS inner-product search ──▶ top-5   │
+│     most relevant chunks from the knowledge base             │
+│     (Local FAISS index on disk)                              │
+└──────────────┬───────────────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  3. AUGMENT                                                  │
+│     System prompt + retrieved chunks (with source citations) │
+│     + conversation history + current user message            │
+│     → one rich message list for the LLM                      │
+└──────────────┬───────────────────────────────────────────────┘
+               │
+               ▼
+┌──────────────────────────────────────────────────────────────┐
+│  4. GENERATE                                                 │
+│     NVIDIA NIM LLM (Nemotron / Llama / DeepSeek / etc.)     │
+│     → Streams answer token-by-token via WebSocket/SSE        │
+│     → Reasoning/thinking tokens shown in collapsible block    │
+└──────────────┬───────────────────────────────────────────────┘
+               │
+               ▼
+  Agent responds with citations:
+  "Based on [Source: deploy.md (chunk 2)], the deployment
+   process involves..." or honestly: "The knowledge base
+   does not contain information about that."
+```
+
+Every answer cites its source file and chunk number. If the knowledge base doesn't contain the answer, the agent says so honestly — no hallucination.
+
+---
+
+### Data Flow Diagram
+
+```
+                        ┌─────────────┐
+                        │  Documents   │
+                        │  (12 formats)│
+                        └──────┬──────┘
+                               │
+                        ┌──────▼──────┐
+                        │  Ingestion   │
+                        │  Pipeline    │
+                        └──────┬──────┘
+                               │
+                 ┌─────────────┼─────────────┐
+                 │             │             │
+          ┌──────▼──────┐ ┌───▼────┐ ┌──────▼──────┐
+          │   Chunker   │ │ Embed  │ │  FAISS      │
+          │  (Boundary  │ │ Client │ │  Vector     │
+          │   Aware)    │ │(Batch) │ │  Store      │
+          └──────┬──────┘ └───┬────┘ └──────┬──────┘
+                 │            │             │
+                 └────────────┼─────────────┘
+                              │
+                      ┌───────▼───────┐
+                      │  Knowledge    │
+                      │  Base Index   │
+                      │  (kb/index/)  │
+                      └───────┬───────┘
+                              │
+              ┌───────────────┼───────────────┐
+              │               │               │
+       ┌──────▼──────┐ ┌─────▼──────┐ ┌──────▼──────┐
+       │   REST API  │ │  SSE Stream│ │  WebSocket  │
+       │  /api/chat  │ │  /api/chat │ │  /api/ws/   │
+       │             │ │  /stream   │ │    chat      │
+       └──────┬──────┘ └─────┬──────┘ └──────┬──────┘
+              │               │               │
+              └───────────────┼───────────────┘
+                              │
+                       ┌──────▼──────┐
+                       │   Browser   │
+                       │  Chat UI    │
+                       └─────────────┘
+```
+
+---
+
+### Streaming Architecture
+
+```
+  Browser                    FastAPI                   Worker Thread
+  ───────                    ───────                   ─────────────
+     │                          │                          │
+     │  WebSocket connect       │                          │
+     │─────────────────────────▶│                          │
+     │                          │                          │
+     │  {"message": "hello"}    │                          │
+     │─────────────────────────▶│                          │
+     │                          │  run_in_executor()       │
+     │                          │─────────────────────────▶│
+     │                          │                          │
+     │                          │               chat_stream() generator
+     │                          │               ├─ yield {"type": "reasoning"}
+     │                          │  queue.put("reasoning")  │
+     │  {"type":"reasoning"}    │◀─────────────────────────│
+     │◀─────────────────────────│                          │
+     │                          │                          │
+     │                          │               ├─ yield {"type": "text"}
+     │                          │  queue.put("token")      │
+     │  {"type":"token"}        │◀─────────────────────────│
+     │◀─────────────────────────│                          │
+     │                          │               ├─ generator ends
+     │                          │  queue.put("done")       │
+     │  {"type":"done"}         │◀─────────────────────────│
+     │◀─────────────────────────│                          │
+     │                          │                          │
+```
+
+**Why thread+queue?** The OpenAI SDK is synchronous. We run `chat_stream()` in a worker thread, pipe events through `asyncio.Queue` to the async FastAPI handler — avoiding the `StopIteration`-in-async bug.
+
+---
+
+### Session Persistence
+
+```
+  ┌──────────┐         ┌───────────────┐         ┌──────────────┐
+  │  RAGAgent│────────▶│ SessionStore  │────────▶│  data/       │
+  │  (memory)│  save() │ (thread-safe) │  write() │  sessions/  │
+  │          │◀────────│  mutex lock   │◀──────── │  {uuid}.json│
+  └──────────┘  load() └───────────────┘  read()  └──────────────┘
+       │                                          Atomic write:
+       │  On startup: load_all()                  temp.json.tmp
+       │  On chat: save() after each message        → rename()
+       │  On delete: remove from memory + disk     (POSIX atomic)
+```
+
+Conversations survive server restarts. Every message is timestamped and saved to disk atomically.
+
+---
+
+## ✨ Key Capabilities
+
+| Capability | How It Works |
+|-----------|-------------|
 | **Grounded answers** | Every response is backed by FAISS vector search over your documents, with source citations |
 | **Real-time streaming** | WebSocket + SSE streaming — see the answer (and the agent's reasoning) token by token |
-| **Multi-format ingestion** | Drop in `.pdf`, `.docx`, `.txt`, `.md`, `.py`, `.json`, `.yaml`, `.csv`, `.html`, `.xml`, `.rst` — auto-indexed on startup |
+| **Thinking/reasoning display** | Agent's reasoning tokens shown in a collapsible block — see *how* it thinks |
+| **Multi-format ingestion** | Drop in `.pdf`, `.docx`, `.txt`, `.md`, `.py`, `.json`, `.yaml`, `.yml`, `.csv`, `.html`, `.xml`, `.rst` — auto-indexed on startup |
 | **Smart chunking** | Paragraph-aware → sentence-aware → word-boundary splitting with overlap — no cutting mid-sentence |
 | **Session persistence** | Conversations survive server restarts. Every message is timestamped and saved to disk atomically |
 | **Browser file upload** | Upload PDFs and Word docs directly from the UI — no CLI needed |
 | **Dark-themed chat UI** | Responsive single-page interface — sidebar, session management, KB status panel |
 | **Multi-model support** | Any model on NVIDIA NIM (Nemotron, Llama, DeepSeek, etc.) — just change one config value |
 | **Production patterns** | Custom exceptions, proper HTTP status codes, thread-safe state, filename sanitization, upload size limits |
+| **Zero infrastructure** | No external DB — FAISS index on disk, session JSONs on disk, one Python process |
+
+---
+
+## 📁 Project Structure
+
+```
+nv-agent/
+│
+├── main.py                  # 🚀 Entry point — startup sequence, init, run server
+├── config.py                # ⚙️ Central configuration (dataclasses, reads .env)
+├── test-agent.py            # 🧪 Quick CLI smoke test (bypasses RAG pipeline)
+├── requirements.txt         # 📦 Python dependencies
+├── .env.example             # 🔑 API key template (copy to .env)
+├── .gitignore               # 🛡️ Excludes .env, sessions, __pycache__, .venv
+├── README.md                # 📖 You are here
+├── AGENTS.md                # 🤖 AI agent guidelines and architecture
+│
+├── data/                    # 📂 Your documents — auto-indexed on startup
+│   ├── sample.md            #    Example knowledge base doc
+│   └── sessions/            #    Persisted conversation JSONs (auto-created)
+│
+├── kb/                      # 🧠 Knowledge Base Layer
+│   ├── __init__.py          #    Exports: VectorStore, Chunk, ingest_*, chunk_text
+│   ├── chunker.py           #    Multi-level text splitting (paragraph→sentence→word)
+│   ├── embed.py             #    NVIDIA embedding client (singleton, batched, error-handled)
+│   ├── ingest.py            #    File ingestion + readers (PDF, DOCX, 10 text formats)
+│   ├── vector_store.py      #    FAISS index + chunk metadata + persistence
+│   └── index/               #    Saved FAISS index + chunks.json (auto-created)
+│
+├── agent/                   # 🤖 Agent Layer
+│   ├── __init__.py          #    Exports: RAGAgent, Session, Message, exceptions, SessionStore
+│   ├── rag_agent.py         #    RAG logic: retrieve → augment → generate + session mgmt
+│   └── session_store.py     #    Thread-safe disk persistence (atomic JSON writes)
+│
+├── chat/                    # 🌐 Chat API + UI Layer
+│   ├── __init__.py          #    Exports: create_app, router
+│   ├── app.py               #    FastAPI factory, CORS, static file mount
+│   ├── routes.py            #    All endpoints: REST, SSE, WebSocket, file upload
+│   └── ui/
+│       ├── index.html       #    Chat page (sidebar, messages, upload, KB panel)
+│       ├── style.css        #    Dark theme with NVIDIA green accent
+│       ├── app.js           #    Client logic (WS, SSE, session mgmt, file upload)
+│       └── marked.min.js    #    Markdown renderer
+│
+└── .claude/                 # 🔧 Claude Code settings
+    └── settings.local.json  #    Local permissions
+```
+
+### Design Decisions
+
+| Decision | Why |
+|----------|-----|
+| **No build step** | UI is vanilla HTML/CSS/JS — zero toolchain, just open in a browser |
+| **FAISS (not a vector DB)** | Zero-infrastructure — index lives on disk, no external service needed |
+| **Singleton OpenAI client** | Both `embed.py` and `rag_agent.py` lazily create one client — no connection churn |
+| **Thread+Queue for streaming** | OpenAI SDK is synchronous — worker thread + `asyncio.Queue` bridges sync→async |
+| **Atomic file writes** | Sessions and index use temp-file + `rename()` (POSIX atomic) — no corruption on crash |
+| **Skip dirs in ingestion** | `data/sessions/`, `.git`, `.venv` are excluded — session JSONs don't pollute the KB |
+| **Custom exception hierarchy** | `RAGAgentError → SessionNotFoundError / LLMError` — routes catch specific types, return proper HTTP codes |
+| **Filename sanitization** | Upload endpoint strips path traversal (`../../../etc/passwd` → `_.._.._.._etc_passwd`) |
+| **OpenAI-compatible API** | Using NVIDIA NIM's OpenAI-compatible endpoint means we use the standard `openai` SDK — no vendor lock-in |
 
 ---
 
@@ -35,8 +361,13 @@ NV-Agent is a **complete, self-contained RAG system** — not a library, not a f
 
 ### Prerequisites
 
-- Python 3.11+
-- NVIDIA NIM API key — grab one free at [build.nvidia.com](https://build.nvidia.com/)
+- **Python 3.11+**
+- **NVIDIA NIM API key** — create a free account at [build.nvidia.com](https://build.nvidia.com/)
+
+NV-Agent accepts any of these environment variables for your API key:
+- `NVIDIA_NIM_API_KEY` (preferred)
+- `NVIDIA_API_KEY`
+- `NGC_API_KEY`
 
 ### Install & Run
 
@@ -51,9 +382,10 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 # 3. Install dependencies
 pip install -r requirements.txt
 
-# 4. Configure your API key
+# 4. Configure your API key (uses NVIDIA_NIM_API_KEY by default)
 cp .env.example .env
 # Edit .env — set NVIDIA_NIM_API_KEY="nvapi-your-key-here"
+# Or export any of: NVIDIA_NIM_API_KEY, NVIDIA_API_KEY, NGC_API_KEY
 
 # 5. Add your documents (optional)
 cp ~/my-docs/*.pdf ~/my-docs/*.docx data/
@@ -67,96 +399,104 @@ Then open **http://localhost:8000** in your browser and start chatting.
 - 🖥️ **Chat UI**: http://localhost:8000
 - 📖 **Interactive API Docs**: http://localhost:8000/docs
 
----
+### Quick API Test (No Server)
 
-## 🏗️ How It Works — The RAG Pipeline
+To verify your API key before launching the full server:
 
-```
-  You ask a question
-         │
-         ▼
-  ┌──────────────────────────────────────────────────────────┐
-  │  1. EMBED QUERY                                          │
-  │     Your question → bge-m3 embedding → 1024-dim vector   │
-  └──────────────┬───────────────────────────────────────────┘
-                 │
-                 ▼
-  ┌──────────────────────────────────────────────────────────┐
-  │  2. RETRIEVE                                              │
-  │     Vector → FAISS inner-product search → top-5 chunks   │
-  └──────────────┬───────────────────────────────────────────┘
-                 │
-                 ▼
-  ┌──────────────────────────────────────────────────────────┐
-  │  3. AUGMENT                                               │
-  │     System prompt + retrieved chunks + chat history       │
-  │     → one rich message list for the LLM                   │
-  └──────────────┬───────────────────────────────────────────┘
-                 │
-                 ▼
-  ┌──────────────────────────────────────────────────────────┐
-  │  4. GENERATE                                              │
-  │     NVIDIA NIM LLM (Nemotron, Llama, etc.)                │
-  │     → Streams answer token-by-token via WebSocket/SSE     │
-  └──────────────────────────────────────────────────────────┘
+```bash
+python test-agent.py
 ```
 
-Every answer cites its source file and chunk number. If the knowledge base doesn't contain the answer, the agent says so honestly.
+This runs a standalone CLI smoke test that calls the NVIDIA NIM API directly — no FAISS index, no document ingestion, no web server. It uses a hardcoded model (`deepseek-ai/deepseek-v4-pro`) for quick testing. If this works, your key is valid and the full server will too.
 
 ---
 
-## 📁 Project Structure
+## 📖 How to Use
 
+### Adding Documents
+
+NV-Agent supports **three ways** to add documents to your knowledge base:
+
+| Method | How | Best For |
+|--------|-----|----------|
+| **File drop** | Copy files into `data/` directory before startup | Bulk loading, initial setup |
+| **Browser upload** | Click "Upload File" in the sidebar | Quick additions from the UI |
+| **API ingest** | `POST /api/kb/ingest` with raw text, or `POST /api/kb/ingest-file` by path | Automation, scripts, CI/CD |
+
+**Supported formats**: `.pdf`, `.docx`, `.txt`, `.md`, `.py`, `.json`, `.yaml`, `.yml`, `.csv`, `.html`, `.xml`, `.rst`
+
+> **Tip**: After adding files to `data/`, hit **"Refresh Status"** in the sidebar, or call `POST /api/kb/ingest-dir` to re-index without restarting the server.
+
+### Chatting with Your Knowledge Base
+
+1. Open **http://localhost:8000**
+2. Click **"+ New Chat"** in the sidebar
+3. Ask any question about your documents
+4. The agent will:
+   - Search the knowledge base for relevant chunks
+   - Show its **reasoning** in a collapsible "💭 Thinking…" block
+   - Stream the **answer** token-by-token with source citations
+   - Honestly say when the knowledge base doesn't contain the answer
+
+**Example questions**:
+- "What does the deployment process look like?" (if you have deployment docs)
+- "Summarize the key points from the quarterly report" (if you uploaded a PDF)
+- "What are the API conventions used in this project?" (if you added code files)
+
+### Managing Sessions
+
+- **Create**: Click "+ New Chat" or `POST /api/sessions`
+- **Switch**: Click a session in the sidebar — full history loads from disk
+- **Delete**: Click the × button on a session — removes from memory and disk
+- **Persist**: Automatic — every message is saved to `data/sessions/{uuid}.json`
+- **Survive restarts**: Sessions are loaded from disk on server startup
+
+### Choosing Models
+
+NV-Agent works with **any model on NVIDIA NIM**. Change the chat model in `config.py`:
+
+```python
+# In config.py, NVIDIAConfig class:
+chat_model: str = "nvidia/nemotron-3-ultra-550b-a55b"  # Default
+# chat_model: str = "meta/llama-3.1-8b-instruct"       # Fast, cheap
+# chat_model: str = "deepseek-ai/deepseek-v4-pro"      # Strong reasoning
 ```
-nv-agent/
-├── main.py                  # 🚀 Entry point — startup, init, run server
-├── config.py                # ⚙️ All configuration (env vars, defaults, dataclasses)
-├── requirements.txt         # 📦 Python dependencies
-├── .env.example             # 🔑 API key template (copy to .env)
-├── .gitignore               # 🛡️ Excludes .env, sessions, __pycache__, .venv
-│
-├── data/                    # 📂 Your documents — auto-indexed on startup
-│   ├── sample.md            # Example knowledge base doc
-│   └── sessions/            # Persisted conversation JSONs (auto-created)
-│
-├── kb/                      # 🧠 Knowledge Base Layer
-│   ├── __init__.py          #    Exports: VectorStore, Chunk, ingest_*, chunk_text
-│   ├── chunker.py           #    Multi-level text splitting (paragraph→sentence→word)
-│   ├── embed.py             #    NVIDIA embedding client (singleton, batched, error-handled)
-│   ├── ingest.py            #    File ingestion + readers (PDF, DOCX, 10 text formats)
-│   ├── vector_store.py      #    FAISS index + metadata persistence
-│   └── index/               #    Saved FAISS index + chunks.json (auto-created)
-│
-├── agent/                   # 🤖 Agent Layer
-│   ├── __init__.py          #    Exports: RAGAgent, Session, Message, exceptions, SessionStore
-│   ├── rag_agent.py         #    RAG logic: retrieve → augment → generate
-│   └── session_store.py     #    Thread-safe disk persistence (atomic JSON writes)
-│
-├── chat/                    # 🌐 Chat API + UI Layer
-│   ├── __init__.py          #    Exports: create_app, router
-│   ├── app.py               #    FastAPI factory, CORS, static file mount
-│   ├── routes.py            #    All endpoints: REST, SSE, WebSocket, file upload
-│   └── ui/
-│       ├── index.html       #    Chat page (sidebar, messages, upload, KB panel)
-│       ├── style.css        #    Dark theme with NVIDIA green accent
-│       ├── app.js           #    Client logic (WS, SSE, session mgmt, file upload)
-│       └── marked.min.js    #    Markdown renderer
-│
-└── test-agent.py            # 🧪 Quick CLI smoke test
-```
 
-### Design Decisions
+Or set the `MODEL` environment variable to override at runtime.
 
-| Decision | Why |
-|----------|-----|
-| **No build step** | UI is vanilla HTML/CSS/JS — zero toolchain, just open in a browser |
-| **FAISS (not a vector DB)** | Zero-infrastructure — index lives on disk, no external service needed |
-| **Singleton OpenAI client** | Both embed.py and rag_agent.py lazily create one client — no connection churn |
-| **Thread+Queue for streaming** | OpenAI SDK is synchronous — we run it in a worker thread, pipe events via asyncio.Queue to avoid the StopIteration-in-async bug |
-| **Atomic file writes** | Sessions and index use temp-file + rename (POSIX atomic) — no corruption on crash |
-| **Skip dirs in ingestion** | `data/sessions/`, `.git`, `.venv` are excluded — session JSONs don't pollute the knowledge base |
-| **Custom exception hierarchy** | `RAGAgentError → SessionNotFoundError / LLMError` — routes catch specific types and return proper HTTP codes |
-| **Filename sanitization** | Upload endpoint strips path traversal (`../../../etc/passwd` → `_.._.._.._etc_passwd`) |
+> ⚠️ **If you change the embedding model**: You MUST delete `kb/index/` to reset the vector index — mismatched dimensions will cause search failures.
+
+---
+
+## ⚙️ Configuration
+
+All settings are in `config.py` with sensible defaults. Override via environment variables.
+
+### Environment Variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `NVIDIA_NIM_API_KEY` | ✅ | — | Your NVIDIA NIM API key (also accepts `NVIDIA_API_KEY`, `NGC_API_KEY`) |
+| `MODEL` | ❌ | `nvidia/nemotron-3-ultra-550b-a55b` | Override the chat model |
+
+### Config Defaults (`config.py`)
+
+| Setting | Default | What It Controls |
+|---------|---------|-----------------|
+| `chat_model` | `nvidia/nemotron-3-ultra-550b-a55b` | LLM model ID (any model on NVIDIA NIM) |
+| `embedding_model` | `baai/bge-m3` | Embedding model (must match `embedding_dim`) |
+| `embedding_dim` | 1024 | Vector dimension — must match embedding model output |
+| `temperature` | 1.0 | LLM sampling temperature |
+| `top_p` | 0.95 | Nucleus sampling threshold |
+| `max_tokens` | 16384 | Max response tokens |
+| `enable_thinking` | True | Show reasoning/thinking tokens in streaming |
+| `reasoning_budget` | 16384 | Token budget for reasoning |
+| `chunk_size` | 512 | Characters per chunk |
+| `chunk_overlap` | 64 | Overlap characters between chunks |
+| `top_k` | 5 | Number of context chunks to retrieve per query |
+| `data_dir` | `./data` | Directory for knowledge base documents |
+| `port` | 8000 | Server port |
+| `cors_origins` | `["*"]` | CORS allowed origins |
 
 ---
 
@@ -184,6 +524,15 @@ data: {"reasoning": "thinking..."}
 data: [DONE]
 ```
 
+**WebSocket messages**:
+```json
+→ {"message": "hello"}
+← {"type": "token", "content": "answer "}
+← {"type": "reasoning", "content": "thinking..."}
+← {"type": "done", "full": "complete answer"}
+← {"type": "error", "content": "error message"}
+```
+
 ### Sessions
 
 | Method | Endpoint | Description |
@@ -198,10 +547,10 @@ data: [DONE]
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/kb/status` | Chunk count + index status |
-| `POST` | `/api/kb/ingest` | Ingest raw text (JSON body) |
-| `POST` | `/api/kb/ingest-dir` | Re-scan data/ and index all files |
+| `POST` | `/api/kb/ingest` | Ingest raw text (JSON body: `{text, source}`) |
+| `POST` | `/api/kb/ingest-dir` | Re-scan `data/` and index all files |
 | `POST` | `/api/kb/ingest-file` | Ingest a file by server path |
-| `POST` | `/api/kb/upload` | **Upload file** (multipart/form-data, PDF/DOCX supported) |
+| `POST` | `/api/kb/upload` | **Upload file** (multipart/form-data, 12 formats supported) |
 | `DELETE` | `/api/kb/reset` | Clear the entire knowledge base |
 
 ### Health
@@ -212,114 +561,22 @@ data: [DONE]
 
 ---
 
-## ⚙️ Configuration
+## 🔒 Security
 
-All settings are in `config.py` with sensible defaults. Override via environment variables.
-
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `NVIDIA_NIM_API_KEY` | ✅ | — | Your NVIDIA NIM API key (also accepts `NVIDIA_API_KEY`, `NGC_API_KEY`) |
-
-### Config Defaults (`config.py`)
-
-| Setting | Default | What It Controls |
-|---------|---------|-----------------|
-| `chat_model` | `nvidia/nemotron-3-ultra-550b-a55b` | LLM model ID (any model on NVIDIA NIM) |
-| `embedding_model` | `baai/bge-m3` | Embedding model (must match `embedding_dim`) |
-| `embedding_dim` | 1024 | Vector dimension — must match embedding model output |
-| `temperature` | 1.0 | LLM sampling temperature |
-| `top_p` | 0.95 | Nucleus sampling threshold |
-| `max_tokens` | 16384 | Max response tokens |
-| `enable_thinking` | True | Show reasoning/thinking tokens |
-| `reasoning_budget` | 16384 | Token budget for reasoning |
-| `chunk_size` | 512 | Characters per chunk |
-| `chunk_overlap` | 64 | Overlap characters between chunks |
-| `top_k` | 5 | Number of context chunks to retrieve |
-| `data_dir` | `./data` | Directory for knowledge base documents |
-| `port` | 8000 | Server port |
-| `cors_origins` | `["*"]` | CORS allowed origins |
-
-> ⚠️ **If you change the embedding model**, you MUST delete `kb/index/` to reset the vector index — mismatched dimensions will cause search failures.
-
----
-
-## 🔄 Run Steps — How Data Flows
-
-### Server Startup (`main.py`)
-
-```
-1. Validate NVIDIA_API_KEY exists
-2. Load/create FAISS vector store from kb/index/
-3. Auto-ingest all files in data/ → chunk → embed → index
-4. Initialize SessionStore (data/sessions/)
-5. Load all persisted sessions into memory
-6. Initialize RAGAgent with store + session_store
-7. Create FastAPI app with CORS, routes, static file mount
-8. Start uvicorn on 0.0.0.0:8000
-```
-
-### Document Ingestion (startup, API upload, or directory re-scan)
-
-```
-1. Walk data/ directory (skip sessions/, .git, .venv, __pycache__)
-2. For each supported file (.pdf, .docx, .txt, .md, etc.):
-   a. Read file using format-specific reader
-   b. Split text into overlapping chunks (paragraph/sentence-aware)
-   c. Batch-embed chunks (16 at a time via NVIDIA embedding API)
-   d. Normalize vectors (L2) → add to FAISS index
-   e. Save updated index + metadata to kb/index/
-3. Report: N files, M chunks, E errors
-```
-
-### Chat Request (REST, SSE, or WebSocket)
-
-```
-1. Look up session by ID (load from disk if not in memory)
-2. Embed user query → search FAISS for top-k similar chunks
-3. Build message list:
-   - System prompt with RAG instructions
-   - Injected context: retrieved chunks with source citations
-   - Conversation history (user + assistant messages)
-   - Current user message
-4. Call NVIDIA LLM API (streaming or non-streaming)
-5. Stream tokens to client via WebSocket/SSE:
-   - "reasoning" events → thinking/reasoning tokens
-   - "token" events → visible answer tokens
-6. On completion: save user + assistant messages to session
-7. Persist session to data/sessions/{id}.json (atomic write)
-```
-
-### Session Persistence
-
-```
-- On create:  Session → data/sessions/{uuid}.json (atomic temp+rename)
-- On chat:    Append messages, update timestamp, re-save
-- On startup: Load all JSON files from data/sessions/ into memory
-- On switch:  If not in memory, try loading from disk
-- On delete:  Remove from memory + delete JSON file
-```
-
-### File Upload (browser → server)
-
-```
-1. Browser reads file, creates FormData
-2. POST /api/kb/upload (multipart/form-data)
-3. Server validates extension (.pdf, .docx, .txt, etc.)
-4. Server sanitizes filename (strip path traversal)
-5. Server checks file size (max 50 MB)
-6. Save file to data/{sanitized_name}
-7. Run through ingestion pipeline (read → chunk → embed → index)
-8. Return chunks_added count
-9. If ingestion fails, clean up the saved file
-```
+| Measure | Details |
+|---------|---------|
+| **No API key in source control** | `.env` is in `.gitignore` — never commit it |
+| **Filename sanitization** | Path traversal stripped, null bytes removed, special chars replaced with `_` |
+| **Upload size limit** | 50 MB max (`MAX_UPLOAD_SIZE` in routes.py) |
+| **Extension validation** | Only `SUPPORTED_EXTENSIONS` allowed → 400 if unsupported |
+| **Generic error responses** | Internal details logged server-side, clients get `"Internal error"` |
+| **Custom exception hierarchy** | Specific HTTP codes: 404 for missing sessions, 502 for LLM errors, 500 for catch-all |
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! Here's how to get started.
+We welcome contributions! See [AGENTS.md](AGENTS.md) for the full architecture guidelines and coding standards.
 
 ### Development Setup
 
@@ -327,32 +584,18 @@ We welcome contributions! Here's how to get started.
 git clone <your-repo-url> && cd nv-agent
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # Add your NVIDIA API key
+cp .env.example .env        # Add your NVIDIA API key
 ```
 
 ### Contribution Workflow
 
 1. **Fork** the repo and create a feature branch from `main`
-2. **Make your changes** — follow the code style below
+2. **Make your changes** — follow the code style in [AGENTS.md](AGENTS.md)
 3. **Test manually** — run `python main.py` and verify your change works end-to-end
 4. **Commit clearly** — use descriptive messages (`Add X support`, `Fix Y bug`)
 5. **Open a Pull Request** — describe what you changed and why
 
-### Code Standards
-
-| Area | Standard |
-|------|----------|
-| **Python** | PEP 8, type hints on all function signatures, docstrings on public functions |
-| **Error handling** | Use custom exceptions (`RAGAgentError`, `DocumentIngestionError`), never expose internal details in API responses |
-| **Logging** | `logging.getLogger(__name__)` per module, prefix with `[module]` (e.g., `[rag]`, `[ingest]`) |
-| **Imports** | Stdlib → third-party → local, blank lines between groups |
-| **JavaScript** | 2-space indent, strict mode, no frameworks |
-| **CSS** | Custom properties for theming, BEM-like naming |
-| **Tests** | Manual validation via `python main.py` + browser/API testing |
-
 ### Adding a New File Format
-
-Want to support `.epub`, `.pptx`, or another format?
 
 1. Add a reader function in `kb/ingest.py` — follow the `_read_pdf` / `_read_docx` pattern
 2. Register it in the `_READERS` dict
@@ -369,20 +612,8 @@ NV-Agent uses the OpenAI-compatible API format via `config.nvidia.base_url`. To 
 2. Delete `kb/index/` to reset the vector store (different embedding = different dimensions)
 3. Set the appropriate API key env var
 
-### Project Conventions
-
-| Convention | Reason |
-|---|---|
-| **No build step** | UI is vanilla HTML/CSS/JS served as static files — zero toolchain friction |
-| **Singleton clients** | OpenAI clients in `embed.py` and `rag_agent.py` are lazily initialized and reused — no connection waste |
-| **Thread-safe state** | `SessionStore` uses mutex locks; streaming uses thread+queue to bridge sync SDK → async server |
-| **Atomic writes** | Session files and FAISS index use temp-file + `rename()` — crash-safe on POSIX |
-| **Skip dirs in ingestion** | `sessions/`, `.git`, `.venv`, `__pycache__`, `.claude` won't pollute the knowledge base |
-| **Sanitized filenames** | Uploads strip path traversal, null bytes, and special characters |
-| **Generic error responses** | Routes log full exceptions but return `"Internal error"` to clients — no stack traces leaked |
-
 ---
 
 ## 📄 License
 
-This project is provided as-is. See [LICENSE](LICENSE) for details.
+This project is provided as-is. License to be determined.
