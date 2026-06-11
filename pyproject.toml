@@ -1,6 +1,10 @@
 # ── NV-Agent Project Configuration ──────────────────────────
 # Covers: ruff (lint+format), mypy (type checking), pytest
 
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "nv-agent"
 version = "1.0.0"
@@ -8,6 +12,10 @@ description = "Self-hosted RAG AI Agent powered by NVIDIA NIM"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
+
+[tool.setuptools]
+packages = ["kb", "agent", "chat"]
+py-modules = ["config", "main"]
 
 # ── Ruff — Linting + Formatting ─────────────────────────────
 [tool.ruff]
