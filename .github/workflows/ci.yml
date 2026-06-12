@@ -74,6 +74,7 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio httpx
+          pip install -e .
 
       - name: Run unit tests
         run: pytest tests/ -v -m "unit" --tb=short
