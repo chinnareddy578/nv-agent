@@ -10,21 +10,21 @@ import pytest
 class TestNVIDIAConfig:
     """Tests for NVIDIA API configuration."""
 
-    @patch.dict(os.environ, {"NVIDIA_API_KEY": "nvapi-test-123"}, clear=False)
+    @patch.dict(os.environ, {"NVIDIA_API_KEY": "nvapi-test-123"}, clear=True)
     def test_resolves_nvidia_api_key(self):
         from config import _get_nvidia_api_key
 
         result = _get_nvidia_api_key()
         assert result == "nvapi-test-123"
 
-    @patch.dict(os.environ, {"NVIDIA_NIM_API_KEY": "nvapi-nim-456"}, clear=False)
+    @patch.dict(os.environ, {"NVIDIA_NIM_API_KEY": "nvapi-nim-456"}, clear=True)
     def test_resolves_nim_api_key(self):
         from config import _get_nvidia_api_key
 
         result = _get_nvidia_api_key()
         assert result == "nvapi-nim-456"
 
-    @patch.dict(os.environ, {"NGC_API_KEY": "ngc-key-789"}, clear=False)
+    @patch.dict(os.environ, {"NGC_API_KEY": "ngc-key-789"}, clear=True)
     def test_resolves_ngc_api_key(self):
         from config import _get_nvidia_api_key
 
